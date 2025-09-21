@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sphère Géodésique</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #495057;
+            z-index: 100;
+            font-size: 18px;
+            text-shadow: 1px 1px 2px rgba(255,255,255,0.8);
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #495057;
+            font-size: 24px;
+            z-index: 100;
+            text-shadow: 1px 1px 2px rgba(255,255,255,0.8);
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+            font-size: 14px;
+            color: #495057;
+            max-width: 250px;
+        }
+        .control-group {
+            margin-bottom: 10px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        button {
+            background: #4a90e2;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 5px;
+        }
+        button:hover {
+            background: #357abd;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="info">Sphère Géodésique - Structure Hexagonale</div>
+        <div id="loading">Chargement...</div>
+        <div id="controls" style="display: none;">
+            <div class="control-group">
+                <label>🎮 Contrôles :</label>
+                <div>🖱️ Clic gauche + glisser : Rotation</div>
+                <div>🖱️ Molette : Zoom</div>
+                <div>🔄 Rotation automatique</div>
+            </div>
+            <div class="control-group">
+                <button id="toggleAuto">⏸️ Pause</button>
+                <button id="resetView">🔄 Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, geodesicSphere, animationId;
+        let mouseX = 0, mouseY = 0;
+        let isMouseDown = false;
+        let previousMouseX = 0, previousMouseY = 0;
+        let rotationX = 0, rotationY = 0;
+        let isAutoRotating = true;
+        let zoom = 8;
+        const windowHalfX = window.innerWidth / 2;
+        const windowHalfY = window.innerHeight / 2;
+
+        function init() {
+            console.log('Initialisation de la sphère géodésique...');
+            
+            // Vérifier que Three.js est chargé
+            if (typeof THREE === 'undefined') {
+                console.error('Three.js n\'est pas chargé !');
+                document.getElementById('loading').textContent = 'Erreur: Three.js non chargé';
+                return;
+            }
+            console.log('Three.js chargé:', THREE.REVISION);
+
+            // Configuration de la scène
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf8f9fa);
+            console.log('Scène créée');
+
+            // Configuration de la caméra
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, zoom);
+            camera.lookAt(0, 0, 0);
+            console.log('Caméra créée');
+
+            // Configuration du rendu
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('container').appendChild(renderer.domElement);
+            console.log('Renderer créé');
+
+            // Création de la sphère géodésique
+            createGeodesicSphere();
+
+            // Éclairage
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(10, 10, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+            console.log('Éclairage ajouté');
+
+            // Masquer le texte de chargement et afficher les contrôles
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('controls').style.display = 'block';
+
+            // Gestionnaires d'événements
+            setupControls();
+            window.addEventListener('resize', onWindowResize, false);
+            
+            console.log('Initialisation terminée');
+        }
+
+        function createGeodesicSphere() {
+            console.log('Création de la sphère géodésique...');
+            
+            const group = new THREE.Group();
+            const radius = 3;
+
+            // Méthode simplifiée : utiliser directement la géométrie avec EdgesGeometry
+            const geometry = new THREE.IcosahedronGeometry(radius, 2);
+            console.log('Géométrie icosaédrique créée');
+            
+            // Créer les arêtes directement avec EdgesGeometry
+            const edgesGeometry = new THREE.EdgesGeometry(geometry);
+            const edgesMaterial = new THREE.LineBasicMaterial({ 
+                color: 0x333333,
+                linewidth: 3
+            });
+            const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+            group.add(edges);
+            console.log('Arêtes créées avec EdgesGeometry');
+
+            // Créer les sommets
+            const vertices = geometry.attributes.position.array;
+            const vertexPositions = [];
+            for (let i = 0; i < vertices.length; i += 3) {
+                vertexPositions.push(new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]));
+            }
+
+            // Création des sommets visuels
+            vertexPositions.forEach(pos => {
+                const vertexGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+                const vertexMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0x4a90e2
+                });
+                const vertexMesh = new THREE.Mesh(vertexGeometry, vertexMaterial);
+                vertexMesh.position.copy(pos);
+                vertexMesh.castShadow = true;
+                group.add(vertexMesh);
+            });
+            console.log('Sommets créés:', vertexPositions.length);
+
+
+            // Création des faces avec des matériaux semi-transparents
+            const faceMaterial = new THREE.MeshLambertMaterial({
+                color: 0xe3f2fd,
+                transparent: true,
+                opacity: 0.3,
+                side: THREE.DoubleSide,
+                wireframe: false
+            });
+
+            const faceMesh = new THREE.Mesh(geometry, faceMaterial);
+            faceMesh.receiveShadow = true;
+            group.add(faceMesh);
+            console.log('Faces créées');
+
+            geodesicSphere = group;
+            scene.add(geodesicSphere);
+            console.log('Sphère géodésique ajoutée à la scène');
+        }
+
+        function setupControls() {
+            // Rotation avec la souris
+            document.addEventListener('mousedown', onMouseDown, false);
+            document.addEventListener('mouseup', onMouseUp, false);
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('wheel', onMouseWheel, false);
+            
+            // Boutons de contrôle
+            document.getElementById('toggleAuto').addEventListener('click', toggleAutoRotation);
+            document.getElementById('resetView').addEventListener('click', resetView);
+        }
+
+        function onMouseDown(event) {
+            isMouseDown = true;
+            previousMouseX = event.clientX;
+            previousMouseY = event.clientY;
+        }
+
+        function onMouseUp(event) {
+            isMouseDown = false;
+        }
+
+        function onMouseMove(event) {
+            if (isMouseDown) {
+                const deltaX = event.clientX - previousMouseX;
+                const deltaY = event.clientY - previousMouseY;
+                
+                rotationY += deltaX * 0.01;
+                rotationX += deltaY * 0.01;
+                
+                previousMouseX = event.clientX;
+                previousMouseY = event.clientY;
+            }
+        }
+
+        function onMouseWheel(event) {
+            event.preventDefault();
+            zoom += event.deltaY * 0.01;
+            zoom = Math.max(2, Math.min(20, zoom)); // Limiter le zoom entre 2 et 20
+            camera.position.z = zoom;
+        }
+
+        function toggleAutoRotation() {
+            isAutoRotating = !isAutoRotating;
+            const button = document.getElementById('toggleAuto');
+            button.textContent = isAutoRotating ? '⏸️ Pause' : '▶️ Play';
+        }
+
+        function resetView() {
+            rotationX = 0;
+            rotationY = 0;
+            zoom = 8;
+            camera.position.set(0, 0, zoom);
+            camera.lookAt(0, 0, 0);
+            if (geodesicSphere) {
+                geodesicSphere.rotation.set(0, 0, 0);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+
+            if (geodesicSphere) {
+                if (isAutoRotating) {
+                    // Rotation automatique
+                    geodesicSphere.rotation.x += 0.004;
+                    geodesicSphere.rotation.y += 0.006;
+                    geodesicSphere.rotation.z += 0.002;
+                } else {
+                    // Rotation manuelle avec la souris
+                    geodesicSphere.rotation.x = rotationX;
+                    geodesicSphere.rotation.y = rotationY;
+                    geodesicSphere.rotation.z += 0.002; // Rotation Z continue même en mode manuel
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function cleanup() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            
+            if (renderer) {
+                renderer.dispose();
+            }
+            
+            if (scene) {
+                scene.traverse((object) => {
+                    if (object.geometry) {
+                        object.geometry.dispose();
+                    }
+                    if (object.material) {
+                        if (Array.isArray(object.material)) {
+                            object.material.forEach(material => material.dispose());
+                        } else {
+                            object.material.dispose();
+                        }
+                    }
+                });
+            }
+        }
+
+        // Gestion du cycle de vie
+        window.addEventListener('beforeunload', cleanup);
+        
+        // Démarrage de l'application
+        init();
+        animate();
+    </script>
+</body>
+</html>

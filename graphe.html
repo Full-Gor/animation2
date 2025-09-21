@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graphe Étoile Animé</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            overflow: hidden;
+            height: 100vh;
+            font-family: 'Arial', sans-serif;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            z-index: 100;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            z-index: 100;
+            font-size: 14px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="info">Graphe Étoile 3D</div>
+        <div id="controls">
+            <strong>Contrôles :</strong><br>
+            • Clic + glisser : Rotation<br>
+            • Molette : Zoom<br>
+            • Relâcher : Rotation automatique
+        </div>
+        <div id="loading">Chargement...</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, starPolygon, animationId;
+        let mouseX = 0, mouseY = 0;
+        let isMouseDown = false;
+        let previousMouseX = 0, previousMouseY = 0;
+        let rotationX = 0, rotationY = 0;
+        const windowHalfX = window.innerWidth / 2;
+        const windowHalfY = window.innerHeight / 2;
+
+        function init() {
+            // Configuration de la scène
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x1a1a2e, 10, 50);
+
+            // Configuration de la caméra
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 10;
+
+            // Configuration du rendu
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // Création du graphe étoile 3D polygonal dense
+            const starGroup = new THREE.Group();
+            
+            // Paramètres du polygone 3D
+            const numVertices = 20; // Nombre de sommets sur la sphère
+            const radius = 3;
+            const vertices = [];
+            
+            // Génération des sommets sur une sphère (distribution uniforme)
+            for (let i = 0; i < numVertices; i++) {
+                const phi = Math.acos(-1 + (2 * i) / numVertices); // Angle polaire
+                const theta = Math.sqrt(numVertices * Math.PI) * phi; // Angle azimutal
+                
+                const x = radius * Math.cos(theta) * Math.sin(phi);
+                const y = radius * Math.sin(theta) * Math.sin(phi);
+                const z = radius * Math.cos(phi);
+                
+                vertices.push(new THREE.Vector3(x, y, z));
+                
+                // Création des sommets visuels
+                const vertexGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+                const vertexMaterial = new THREE.MeshBasicMaterial({ color: 0xff6b6b });
+                const vertexMesh = new THREE.Mesh(vertexGeometry, vertexMaterial);
+                vertexMesh.position.copy(vertices[i]);
+                starGroup.add(vertexMesh);
+            }
+            
+            // Création de toutes les connexions possibles (graphe complet)
+            const lineGeometry = new THREE.BufferGeometry();
+            const linePositions = [];
+            
+            for (let i = 0; i < vertices.length; i++) {
+                for (let j = i + 1; j < vertices.length; j++) {
+                    linePositions.push(vertices[i].x, vertices[i].y, vertices[i].z);
+                    linePositions.push(vertices[j].x, vertices[j].y, vertices[j].z);
+                }
+            }
+            
+            lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+            const lineMaterial = new THREE.LineBasicMaterial({ 
+                color: 0x4ecdc4, 
+                transparent: true, 
+                opacity: 0.4 
+            });
+            const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
+            starGroup.add(lines);
+            
+            // Position centrée du graphe étoile
+            starGroup.position.x = 0;
+            starGroup.position.y = 0;
+            starGroup.position.z = 0;
+            starPolygon = starGroup;
+            scene.add(starPolygon);
+            
+            // Éclairage ambiant
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+            scene.add(ambientLight);
+
+            // Lumière directionnelle principale
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(10, 10, 5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            // Masquer le texte de chargement
+            document.getElementById('loading').style.display = 'none';
+
+            // Gestionnaires d'événements
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('mousedown', onMouseDown, false);
+            document.addEventListener('mouseup', onMouseUp, false);
+            document.addEventListener('wheel', onMouseWheel, false);
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onMouseMove(event) {
+            mouseX = (event.clientX - windowHalfX) / windowHalfX;
+            mouseY = (event.clientY - windowHalfY) / windowHalfY;
+            
+            if (isMouseDown) {
+                const deltaX = event.clientX - previousMouseX;
+                const deltaY = event.clientY - previousMouseY;
+                
+                rotationY += deltaX * 0.01;
+                rotationX += deltaY * 0.01;
+                
+                // Limiter la rotation verticale
+                rotationX = Math.max(-Math.PI/2, Math.min(Math.PI/2, rotationX));
+            }
+            
+            previousMouseX = event.clientX;
+            previousMouseY = event.clientY;
+        }
+
+        function onMouseDown(event) {
+            isMouseDown = true;
+            previousMouseX = event.clientX;
+            previousMouseY = event.clientY;
+        }
+
+        function onMouseUp(event) {
+            isMouseDown = false;
+        }
+
+        function onMouseWheel(event) {
+            // Zoom avec la molette
+            camera.position.z += event.deltaY * 0.01;
+            camera.position.z = Math.max(5, Math.min(20, camera.position.z));
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            animationId = requestAnimationFrame(animate);
+
+            const time = Date.now() * 0.001;
+
+            // Rotation du graphe étoile 3D (automatique + contrôlée par la souris)
+            if (!isMouseDown) {
+                // Rotation automatique quand la souris n'est pas pressée
+                starPolygon.rotation.x += 0.008;
+                starPolygon.rotation.y += 0.012;
+                starPolygon.rotation.z += 0.005;
+            } else {
+                // Rotation contrôlée par la souris
+                starPolygon.rotation.x = rotationX;
+                starPolygon.rotation.y = rotationY;
+            }
+
+            // Animation des sommets (pulsation et mouvement orbital)
+            starPolygon.children.forEach((child, index) => {
+                if (child.geometry && child.geometry.type === 'SphereGeometry') {
+                    const scale = 1 + Math.sin(time * 2 + index * 0.3) * 0.4;
+                    child.scale.setScalar(scale);
+                    
+                    // Mouvement orbital léger
+                    const orbitRadius = 0.1;
+                    const orbitSpeed = time * 0.5 + index * 0.2;
+                    child.position.x += Math.cos(orbitSpeed) * orbitRadius * 0.01;
+                    child.position.y += Math.sin(orbitSpeed) * orbitRadius * 0.01;
+                }
+            });
+
+            // Animation des lignes (changement d'opacité et de couleur)
+            starPolygon.children.forEach((child) => {
+                if (child.material && child.material.type === 'LineBasicMaterial') {
+                    child.material.opacity = 0.3 + Math.sin(time * 2.5) * 0.3;
+                    
+                    // Changement de couleur dynamique
+                    const hue = (time * 0.1) % 1;
+                    child.material.color.setHSL(hue, 0.7, 0.6);
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        function cleanup() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            
+            if (renderer) {
+                renderer.dispose();
+            }
+            
+            if (scene) {
+                scene.traverse((object) => {
+                    if (object.geometry) {
+                        object.geometry.dispose();
+                    }
+                    if (object.material) {
+                        if (Array.isArray(object.material)) {
+                            object.material.forEach(material => material.dispose());
+                        } else {
+                            object.material.dispose();
+                        }
+                    }
+                });
+            }
+        }
+
+        // Gestion du cycle de vie
+        window.addEventListener('beforeunload', cleanup);
+        
+        // Démarrage de l'application
+        init();
+        animate();
+    </script>
+</body>
+</html>
