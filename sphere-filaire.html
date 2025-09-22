@@ -108,6 +108,11 @@
             <div class="control-group">
                 <button id="playPauseBtn" onclick="toggleAnimation()">Pause</button>
                 <button onclick="resetControls()">Reset</button>
+                <button id="startProgressiveAnimation" style="background: #4a90e2; color: white; border: 1px solid #4a90e2;">▶️ Animation Progressive</button>
+            </div>
+            <div class="control-group">
+                <label>Vitesse d'animation: <span id="animationSpeedValue">10</span>ms</label>
+                <input type="range" id="animationSpeedSlider" min="5" max="50" value="10" style="width: 200px;">
             </div>
         </div>
     </div>
@@ -122,7 +127,15 @@
         let connectionColor = 'blue';
         let manualRotationX = 0;
         let manualRotationY = 0;
-        let lines, points = [];
+        let lines;
+        let points = []; // Déclarer points au niveau global
+        
+        // Variables pour l'animation progressive
+        let connectionLines = [];
+        let currentLineIndex = 0;
+        let isProgressiveAnimating = false;
+        let animationSpeed = 10; // millisecondes entre chaque ligne (2x plus rapide)
+        let animationTimer = null;
         const windowHalfX = window.innerWidth / 2;
         const windowHalfY = window.innerHeight / 2;
 
@@ -146,7 +159,7 @@
             // Paramètres de la sphère
             const radius = 3;
             const numPoints = 24; // Nombre de points sur la sphère
-            const points = [];
+            points = []; // Utiliser la variable globale
 
             // Génération de points distribués uniformément sur la sphère
             // Utilisation de la méthode de Fibonacci pour une distribution uniforme
@@ -213,9 +226,29 @@
         }
 
         function createConnections() {
-            const lineGeometry = new THREE.BufferGeometry();
-            const linePositions = [];
-            const lineColors = [];
+            console.log('createConnections appelée, points.length:', points.length);
+            
+            // Nettoyer les anciennes connexions
+            if (lines) {
+                sphereGroup.remove(lines);
+                lines.geometry.dispose();
+                lines.material.dispose();
+                lines = null;
+            }
+            
+            // Nettoyer les anciennes lignes individuelles
+            connectionLines.forEach(line => {
+                sphereGroup.remove(line);
+                line.geometry.dispose();
+                line.material.dispose();
+            });
+            connectionLines = [];
+
+            // Vérifier que les points existent
+            if (!points || points.length === 0) {
+                console.error('Aucun point disponible pour créer les connexions !');
+                return;
+            }
 
             // Couleurs prédéfinies (valeurs RGB de 0 à 1)
             const colors = {
@@ -229,34 +262,33 @@
             const baseColor = colors[connectionColor] || colors.blue;
             console.log('Couleur sélectionnée:', connectionColor, baseColor);
 
+            // Créer chaque connexion individuellement pour l'animation progressive
             for (let i = 0; i < points.length; i++) {
                 for (let j = i + 1; j < points.length; j++) {
-                    const distance = points[i].distanceTo(points[j]);
+                    const lineGeometry = new THREE.BufferGeometry();
+                    const linePositions = [
+                        points[i].x, points[i].y, points[i].z,
+                        points[j].x, points[j].y, points[j].z
+                    ];
                     
-                    // Connecter tous les points
-                    linePositions.push(points[i].x, points[i].y, points[i].z);
-                    linePositions.push(points[j].x, points[j].y, points[j].z);
-                    
-                    // Couleur uniforme pour toutes les connexions
-                    lineColors.push(baseColor[0], baseColor[1], baseColor[2]);
-                    lineColors.push(baseColor[0], baseColor[1], baseColor[2]);
+                    lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+
+                    const lineMaterial = new THREE.LineBasicMaterial({ 
+                        color: new THREE.Color(baseColor[0], baseColor[1], baseColor[2]),
+                        transparent: true,
+                        opacity: 0 // Commencer invisible
+                    });
+
+                    const line = new THREE.Line(lineGeometry, lineMaterial);
+                    line.visible = false; // Commencer cachée
+                    line.userData = { isConnectionLine: true }; // Marquer comme ligne de connexion
+                    connectionLines.push(line);
+                    sphereGroup.add(line);
                 }
             }
-
-            lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
-            lineGeometry.setAttribute('color', new THREE.Float32BufferAttribute(lineColors, 3));
-
-            // Test avec couleur fixe d'abord
-            const lineMaterial = new THREE.LineBasicMaterial({ 
-                color: new THREE.Color(baseColor[0], baseColor[1], baseColor[2]),
-                transparent: true,
-                opacity: connectionOpacity
-            });
-
-            lines = new THREE.LineSegments(lineGeometry, lineMaterial);
-            sphereGroup.add(lines);
             
-            console.log('Connexions créées avec couleur:', connectionColor);
+            console.log('Connexions créées individuellement:', connectionLines.length);
+            console.log('Première connexion:', connectionLines[0]);
         }
 
         function setupControls() {
@@ -284,9 +316,12 @@
             document.getElementById('opacitySlider').addEventListener('input', (e) => {
                 connectionOpacity = parseFloat(e.target.value);
                 document.getElementById('opacityValue').textContent = connectionOpacity.toFixed(1);
-                if (lines) {
-                    lines.material.opacity = connectionOpacity;
-                }
+                // Appliquer l'opacité à toutes les connexions individuelles
+                connectionLines.forEach(line => {
+                    if (line.visible) {
+                        line.material.opacity = connectionOpacity;
+                    }
+                });
             });
 
             // Couleur des connexions
@@ -294,12 +329,16 @@
                 connectionColor = e.target.value;
                 console.log('Changement de couleur vers:', connectionColor);
                 // Recréer les connexions avec la nouvelle couleur
-                if (lines) {
-                    sphereGroup.remove(lines);
-                    lines.geometry.dispose();
-                    lines.material.dispose();
-                }
                 createConnections();
+            });
+            
+            // Animation progressive
+            document.getElementById('startProgressiveAnimation').addEventListener('click', startProgressiveAnimation);
+            
+            // Vitesse d'animation progressive
+            document.getElementById('animationSpeedSlider').addEventListener('input', (e) => {
+                animationSpeed = parseInt(e.target.value);
+                document.getElementById('animationSpeedValue').textContent = animationSpeed;
             });
         }
 
@@ -322,17 +361,20 @@
             document.getElementById('rotationYSlider').value = 0;
             document.getElementById('opacitySlider').value = 0.6;
             document.getElementById('colorSelect').value = 'blue';
+            document.getElementById('animationSpeedSlider').value = 10;
             
             rotationSpeed = 1;
             manualRotationX = 0;
             manualRotationY = 0;
             connectionOpacity = 0.6;
             connectionColor = 'blue';
+            animationSpeed = 10;
             
             document.getElementById('speedValue').textContent = '1';
             document.getElementById('rotationXValue').textContent = '0';
             document.getElementById('rotationYValue').textContent = '0';
             document.getElementById('opacityValue').textContent = '0.6';
+            document.getElementById('animationSpeedValue').textContent = '10';
             
             // Reset rotation
             if (sphereGroup) {
@@ -341,9 +383,10 @@
                 sphereGroup.rotation.z = 0;
             }
             
-            if (lines) {
-                sphereGroup.remove(lines);
-            }
+            // Reset animation progressive
+            resetProgressiveAnimation();
+            
+            // Recréer les connexions
             createConnections();
         }
 
@@ -356,6 +399,100 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function startProgressiveAnimation() {
+            console.log('Démarrage de l\'animation progressive...');
+            console.log('Nombre de connexions disponibles:', connectionLines.length);
+            
+            if (isProgressiveAnimating) {
+                stopProgressiveAnimation();
+                return;
+            }
+            
+            if (connectionLines.length === 0) {
+                console.error('Aucune connexion disponible pour l\'animation !');
+                alert('Aucune connexion disponible. Veuillez d\'abord créer les connexions.');
+                return;
+            }
+            
+            isProgressiveAnimating = true;
+            currentLineIndex = 0;
+            
+            const button = document.getElementById('startProgressiveAnimation');
+            button.textContent = '⏹️ Arrêter Animation';
+            button.style.background = '#e74c3c';
+            
+            // Commencer l'animation progressive
+            animateNextConnection();
+        }
+        
+        function stopProgressiveAnimation() {
+            isProgressiveAnimating = false;
+            if (animationTimer) {
+                clearTimeout(animationTimer);
+                animationTimer = null;
+            }
+            
+            const button = document.getElementById('startProgressiveAnimation');
+            button.textContent = '▶️ Animation Progressive';
+            button.style.background = '#4a90e2';
+        }
+        
+        function resetProgressiveAnimation() {
+            // Réinitialiser l'animation progressive
+            stopProgressiveAnimation();
+            resetConnectionLines();
+        }
+        
+        function resetConnectionLines() {
+            connectionLines.forEach(line => {
+                line.visible = false;
+                line.material.opacity = 0;
+            });
+            currentLineIndex = 0;
+        }
+        
+        function animateNextConnection() {
+            console.log('animateNextConnection appelée, index:', currentLineIndex, 'total:', connectionLines.length);
+            
+            if (!isProgressiveAnimating || currentLineIndex >= connectionLines.length) {
+                if (currentLineIndex >= connectionLines.length) {
+                    console.log('Animation progressive terminée !');
+                    stopProgressiveAnimation();
+                }
+                return;
+            }
+            
+            // Révéler la prochaine connexion
+            const line = connectionLines[currentLineIndex];
+            console.log('Révélation de la connexion', currentLineIndex);
+            line.visible = true;
+            
+            // Animation d'apparition ultra-rapide (2x plus rapide)
+            let opacity = 0;
+            const fadeInDuration = 50; // durée encore plus réduite (2x plus rapide)
+            const fadeSteps = 5; // encore moins d'étapes pour plus de rapidité
+            const opacityStep = 1 / fadeSteps;
+            const stepDuration = fadeInDuration / fadeSteps;
+            
+            let step = 0;
+            const fadeIn = () => {
+                if (step < fadeSteps) {
+                    opacity += opacityStep;
+                    line.material.opacity = opacity * connectionOpacity; // Appliquer l'opacité des contrôles
+                    step++;
+                    setTimeout(fadeIn, stepDuration);
+                }
+            };
+            
+            fadeIn();
+            currentLineIndex++;
+            
+            // Programmer la prochaine connexion
+            animationTimer = setTimeout(() => {
+                animateNextConnection();
+            }, animationSpeed);
         }
 
         function animate() {
@@ -388,6 +525,9 @@
             if (animationId) {
                 cancelAnimationFrame(animationId);
             }
+            
+            // Arrêter l'animation progressive
+            stopProgressiveAnimation();
             
             if (renderer) {
                 renderer.dispose();
