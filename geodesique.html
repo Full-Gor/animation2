@@ -86,6 +86,13 @@
             <div class="control-group">
                 <button id="toggleAuto">⏸️ Pause</button>
                 <button id="resetView">🔄 Reset</button>
+                <button id="startAnimation">▶️ Animation Progressive</button>
+                <button id="wireframeToggle">🔲 Mode Wireframe</button>
+            </div>
+            <div class="control-group">
+                <label>Vitesse d'animation:</label>
+                <input type="range" id="speedSlider" min="5" max="100" value="10" style="width: 100%;">
+                <span id="speedValue">10ms</span>
             </div>
         </div>
     </div>
@@ -99,6 +106,14 @@
         let rotationX = 0, rotationY = 0;
         let isAutoRotating = true;
         let zoom = 8;
+        
+        // Variables pour l'animation progressive
+        let edges = [];
+        let currentEdgeIndex = 0;
+        let isAnimating = false;
+        let animationSpeed = 10; // millisecondes entre chaque arrête (2x plus rapide)
+        let animationTimer = null;
+        let wireframeMode = false;
         const windowHalfX = window.innerWidth / 2;
         const windowHalfY = window.innerHeight / 2;
 
@@ -166,15 +181,34 @@
             const geometry = new THREE.IcosahedronGeometry(radius, 2);
             console.log('Géométrie icosaédrique créée');
             
-            // Créer les arêtes directement avec EdgesGeometry
+            // Créer les arêtes individuellement pour l'animation progressive
             const edgesGeometry = new THREE.EdgesGeometry(geometry);
-            const edgesMaterial = new THREE.LineBasicMaterial({ 
-                color: 0x333333,
-                linewidth: 3
-            });
-            const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
-            group.add(edges);
-            console.log('Arêtes créées avec EdgesGeometry');
+            const positions = edgesGeometry.attributes.position.array;
+            
+            // Créer chaque arrête individuellement
+            edges = [];
+            for (let i = 0; i < positions.length; i += 6) {
+                const edgeGeometry = new THREE.BufferGeometry();
+                const edgePositions = new Float32Array([
+                    positions[i], positions[i + 1], positions[i + 2],
+                    positions[i + 3], positions[i + 4], positions[i + 5]
+                ]);
+                edgeGeometry.setAttribute('position', new THREE.BufferAttribute(edgePositions, 3));
+                
+                const edgeMaterial = new THREE.LineBasicMaterial({ 
+                    color: 0x333333,
+                    linewidth: 3,
+                    transparent: true,
+                    opacity: 0 // Commencer invisible
+                });
+                
+                const edge = new THREE.Line(edgeGeometry, edgeMaterial);
+                edge.visible = false; // Commencer cachée
+                edge.userData = { isEdge: true }; // Marquer comme arrête
+                edges.push(edge);
+                group.add(edge);
+            }
+            console.log('Arêtes créées individuellement:', edges.length);
 
             // Créer les sommets
             const vertices = geometry.attributes.position.array;
@@ -192,10 +226,10 @@
                 const vertexMesh = new THREE.Mesh(vertexGeometry, vertexMaterial);
                 vertexMesh.position.copy(pos);
                 vertexMesh.castShadow = true;
+                vertexMesh.userData = { isVertex: true }; // Marquer comme sommet
                 group.add(vertexMesh);
             });
             console.log('Sommets créés:', vertexPositions.length);
-
 
             // Création des faces avec des matériaux semi-transparents
             const faceMaterial = new THREE.MeshLambertMaterial({
@@ -208,6 +242,7 @@
 
             const faceMesh = new THREE.Mesh(geometry, faceMaterial);
             faceMesh.receiveShadow = true;
+            faceMesh.userData = { isFace: true }; // Marquer comme face
             group.add(faceMesh);
             console.log('Faces créées');
 
@@ -226,6 +261,16 @@
             // Boutons de contrôle
             document.getElementById('toggleAuto').addEventListener('click', toggleAutoRotation);
             document.getElementById('resetView').addEventListener('click', resetView);
+            document.getElementById('startAnimation').addEventListener('click', startProgressiveAnimation);
+            document.getElementById('wireframeToggle').addEventListener('click', toggleWireframeMode);
+            
+            // Contrôle de vitesse
+            const speedSlider = document.getElementById('speedSlider');
+            const speedValue = document.getElementById('speedValue');
+            speedSlider.addEventListener('input', function() {
+                animationSpeed = parseInt(this.value);
+                speedValue.textContent = animationSpeed + 'ms';
+            });
         }
 
         function onMouseDown(event) {
@@ -273,6 +318,113 @@
             if (geodesicSphere) {
                 geodesicSphere.rotation.set(0, 0, 0);
             }
+            
+            // Réinitialiser l'animation progressive
+            stopProgressiveAnimation();
+            resetEdges();
+        }
+        
+        function startProgressiveAnimation() {
+            if (isAnimating) {
+                stopProgressiveAnimation();
+                return;
+            }
+            
+            isAnimating = true;
+            currentEdgeIndex = 0;
+            
+            const button = document.getElementById('startAnimation');
+            button.textContent = '⏹️ Arrêter Animation';
+            button.style.background = '#e74c3c';
+            
+            // Commencer l'animation progressive
+            animateNextEdge();
+        }
+        
+        function stopProgressiveAnimation() {
+            isAnimating = false;
+            if (animationTimer) {
+                clearTimeout(animationTimer);
+                animationTimer = null;
+            }
+            
+            const button = document.getElementById('startAnimation');
+            button.textContent = '▶️ Animation Progressive';
+            button.style.background = '#4a90e2';
+        }
+        
+        function resetEdges() {
+            edges.forEach(edge => {
+                edge.visible = false;
+                edge.material.opacity = 0;
+            });
+            currentEdgeIndex = 0;
+        }
+        
+        function animateNextEdge() {
+            if (!isAnimating || currentEdgeIndex >= edges.length) {
+                if (currentEdgeIndex >= edges.length) {
+                    console.log('Animation progressive terminée !');
+                    stopProgressiveAnimation();
+                }
+                return;
+            }
+            
+            // Révéler la prochaine arrête
+            const edge = edges[currentEdgeIndex];
+            edge.visible = true;
+            
+            // Animation d'apparition ultra-rapide (2x plus rapide)
+            let opacity = 0;
+            const fadeInDuration = 50; // durée encore plus réduite (2x plus rapide)
+            const fadeSteps = 5; // encore moins d'étapes pour plus de rapidité
+            const opacityStep = 1 / fadeSteps;
+            const stepDuration = fadeInDuration / fadeSteps;
+            
+            let step = 0;
+            const fadeIn = () => {
+                if (step < fadeSteps) {
+                    opacity += opacityStep;
+                    edge.material.opacity = opacity;
+                    step++;
+                    setTimeout(fadeIn, stepDuration);
+                }
+            };
+            
+            fadeIn();
+            currentEdgeIndex++;
+            
+            // Programmer la prochaine arrête
+            animationTimer = setTimeout(() => {
+                animateNextEdge();
+            }, animationSpeed);
+        }
+        
+        function toggleWireframeMode() {
+            wireframeMode = !wireframeMode;
+            
+            if (!geodesicSphere) return;
+            
+            const button = document.getElementById('wireframeToggle');
+            
+            // Parcourir tous les objets de la sphère
+            geodesicSphere.traverse((child) => {
+                if (child.userData.isFace) {
+                    // Basculer le mode wireframe pour les faces
+                    child.material.wireframe = wireframeMode;
+                    child.visible = !wireframeMode; // Cacher les faces en mode wireframe
+                } else if (child.userData.isVertex) {
+                    // Afficher/masquer les sommets selon le mode
+                    child.visible = !wireframeMode;
+                }
+                // Les arrêtes restent toujours visibles
+            });
+            
+            // Mettre à jour le bouton
+            button.textContent = wireframeMode ? '🔳 Mode Normal' : '🔲 Mode Wireframe';
+            button.style.background = wireframeMode ? '#27ae60' : '#4a90e2';
+            
+            console.log('Mode wireframe:', wireframeMode ? 'activé' : 'désactivé');
         }
 
         function onWindowResize() {
@@ -305,6 +457,9 @@
             if (animationId) {
                 cancelAnimationFrame(animationId);
             }
+            
+            // Arrêter l'animation progressive
+            stopProgressiveAnimation();
             
             if (renderer) {
                 renderer.dispose();
