@@ -58,7 +58,12 @@
             <strong>Contrôles :</strong><br>
             • Clic + glisser : Rotation<br>
             • Molette : Zoom<br>
-            • Relâcher : Rotation automatique
+            • Relâcher : Rotation automatique<br><br>
+            <button id="startAnimation" style="background: #4a90e2; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; margin: 5px;">▶️ Animation Progressive</button>
+            <button id="resetAnimation" style="background: #e74c3c; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; margin: 5px;">🔄 Reset</button><br>
+            <label style="display: block; margin-top: 10px;">Vitesse:</label>
+            <input type="range" id="speedSlider" min="5" max="50" value="10" style="width: 150px;">
+            <span id="speedValue">10ms</span>
         </div>
         <div id="loading">Chargement...</div>
     </div>
@@ -70,6 +75,13 @@
         let isMouseDown = false;
         let previousMouseX = 0, previousMouseY = 0;
         let rotationX = 0, rotationY = 0;
+        
+        // Variables pour l'animation progressive
+        let lines = [];
+        let currentLineIndex = 0;
+        let isAnimating = false;
+        let animationSpeed = 10; // millisecondes entre chaque ligne (2x plus rapide)
+        let animationTimer = null;
         const windowHalfX = window.innerWidth / 2;
         const windowHalfY = window.innerHeight / 2;
 
@@ -117,25 +129,31 @@
                 starGroup.add(vertexMesh);
             }
             
-            // Création de toutes les connexions possibles (graphe complet)
-            const lineGeometry = new THREE.BufferGeometry();
-            const linePositions = [];
+            // Création de toutes les connexions possibles (graphe complet) - individuellement pour l'animation
+            lines = [];
             
             for (let i = 0; i < vertices.length; i++) {
                 for (let j = i + 1; j < vertices.length; j++) {
-                    linePositions.push(vertices[i].x, vertices[i].y, vertices[i].z);
-                    linePositions.push(vertices[j].x, vertices[j].y, vertices[j].z);
+                    const lineGeometry = new THREE.BufferGeometry();
+                    const linePositions = [
+                        vertices[i].x, vertices[i].y, vertices[i].z,
+                        vertices[j].x, vertices[j].y, vertices[j].z
+                    ];
+                    
+                    lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+                    const lineMaterial = new THREE.LineBasicMaterial({ 
+                        color: 0x4ecdc4, 
+                        transparent: true, 
+                        opacity: 0 // Commencer invisible
+                    });
+                    
+                    const line = new THREE.Line(lineGeometry, lineMaterial);
+                    line.visible = false; // Commencer cachée
+                    line.userData = { isLine: true }; // Marquer comme ligne
+                    lines.push(line);
+                    starGroup.add(line);
                 }
             }
-            
-            lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
-            const lineMaterial = new THREE.LineBasicMaterial({ 
-                color: 0x4ecdc4, 
-                transparent: true, 
-                opacity: 0.4 
-            });
-            const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
-            starGroup.add(lines);
             
             // Position centrée du graphe étoile
             starGroup.position.x = 0;
@@ -165,6 +183,18 @@
             document.addEventListener('mouseup', onMouseUp, false);
             document.addEventListener('wheel', onMouseWheel, false);
             window.addEventListener('resize', onWindowResize, false);
+            
+            // Contrôles d'animation progressive
+            document.getElementById('startAnimation').addEventListener('click', startProgressiveAnimation);
+            document.getElementById('resetAnimation').addEventListener('click', resetAnimation);
+            
+            // Contrôle de vitesse
+            const speedSlider = document.getElementById('speedSlider');
+            const speedValue = document.getElementById('speedValue');
+            speedSlider.addEventListener('input', function() {
+                animationSpeed = parseInt(this.value);
+                speedValue.textContent = animationSpeed + 'ms';
+            });
         }
 
         function onMouseMove(event) {
@@ -208,6 +238,88 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        function startProgressiveAnimation() {
+            if (isAnimating) {
+                stopProgressiveAnimation();
+                return;
+            }
+            
+            isAnimating = true;
+            currentLineIndex = 0;
+            
+            const button = document.getElementById('startAnimation');
+            button.textContent = '⏹️ Arrêter Animation';
+            button.style.background = '#e74c3c';
+            
+            // Commencer l'animation progressive
+            animateNextLine();
+        }
+        
+        function stopProgressiveAnimation() {
+            isAnimating = false;
+            if (animationTimer) {
+                clearTimeout(animationTimer);
+                animationTimer = null;
+            }
+            
+            const button = document.getElementById('startAnimation');
+            button.textContent = '▶️ Animation Progressive';
+            button.style.background = '#4a90e2';
+        }
+        
+        function resetAnimation() {
+            // Réinitialiser l'animation progressive
+            stopProgressiveAnimation();
+            resetLines();
+        }
+        
+        function resetLines() {
+            lines.forEach(line => {
+                line.visible = false;
+                line.material.opacity = 0;
+            });
+            currentLineIndex = 0;
+        }
+        
+        function animateNextLine() {
+            if (!isAnimating || currentLineIndex >= lines.length) {
+                if (currentLineIndex >= lines.length) {
+                    console.log('Animation progressive terminée !');
+                    stopProgressiveAnimation();
+                }
+                return;
+            }
+            
+            // Révéler la prochaine ligne
+            const line = lines[currentLineIndex];
+            line.visible = true;
+            
+            // Animation d'apparition ultra-rapide (2x plus rapide)
+            let opacity = 0;
+            const fadeInDuration = 50; // durée encore plus réduite (2x plus rapide)
+            const fadeSteps = 5; // encore moins d'étapes pour plus de rapidité
+            const opacityStep = 1 / fadeSteps;
+            const stepDuration = fadeInDuration / fadeSteps;
+            
+            let step = 0;
+            const fadeIn = () => {
+                if (step < fadeSteps) {
+                    opacity += opacityStep;
+                    line.material.opacity = opacity;
+                    step++;
+                    setTimeout(fadeIn, stepDuration);
+                }
+            };
+            
+            fadeIn();
+            currentLineIndex++;
+            
+            // Programmer la prochaine ligne
+            animationTimer = setTimeout(() => {
+                animateNextLine();
+            }, animationSpeed);
+        }
+
         function animate() {
             animationId = requestAnimationFrame(animate);
 
@@ -239,14 +351,17 @@
                 }
             });
 
-            // Animation des lignes (changement d'opacité et de couleur)
+            // Animation des lignes (changement de couleur seulement, pas d'opacité)
             starPolygon.children.forEach((child) => {
-                if (child.material && child.material.type === 'LineBasicMaterial') {
-                    child.material.opacity = 0.3 + Math.sin(time * 2.5) * 0.3;
+                if (child.material && child.material.type === 'LineBasicMaterial' && child.userData.isLine) {
+                    // Garder l'opacité fixe pour éviter le clignotement
+                    if (child.visible) {
+                        child.material.opacity = 0.4; // Opacité fixe
+                    }
                     
-                    // Changement de couleur dynamique
-                    const hue = (time * 0.1) % 1;
-                    child.material.color.setHSL(hue, 0.7, 0.6);
+                    // Changement de couleur dynamique (plus subtil)
+                    const hue = (time * 0.05) % 1; // Ralentir le changement de couleur
+                    child.material.color.setHSL(hue, 0.6, 0.5); // Couleurs plus douces
                 }
             });
 
@@ -257,6 +372,9 @@
             if (animationId) {
                 cancelAnimationFrame(animationId);
             }
+            
+            // Arrêter l'animation progressive
+            stopProgressiveAnimation();
             
             if (renderer) {
                 renderer.dispose();
